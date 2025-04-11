@@ -36,9 +36,10 @@ def send_telegram(message):
 
 def get_coin_list():
     url = "https://api.coingecko.com/api/v3/coins/list"
-    res = requests.get(url)
-    coins = res.json()
-    return [coin["id"] for coin in coins[:10]]  # خذ أول 10 عملات مؤقتًا
+    response = requests.get(url)
+    data = response.json()
+    return [coin["id"] for coin in data[:10]]  # خذ أول 10 عملات فقط
+
 
 def get_ohlc(coin_id):
     url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart?vs_currency=usd&days=1&interval=hourly"
