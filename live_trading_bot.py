@@ -38,7 +38,15 @@ def get_coin_list():
     url = "https://api.coingecko.com/api/v3/coins/list"
     response = requests.get(url)
     data = response.json()
-    return [coin["id"] for coin in data[:10]]  # خذ أول 10 عملات فقط
+    
+    if isinstance(data, dict) and "coins" in data:
+        coins = data["coins"]  # إذا كان فيه مفتاح "coins" داخل dict
+    elif isinstance(data, list):
+        coins = data  # إذا كان data عبارة عن list مباشرة
+    else:
+        coins = []  # حالة الطوارئ
+
+    return [coin["id"] for coin in coins[:10]]  # خذ أول 10 عملات
 
 
 def get_ohlc(coin_id):
