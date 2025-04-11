@@ -5,12 +5,14 @@ import joblib
 import json
 from datetime import datetime
 
-# بيانات التليجرام
+# بيانات تليجرام
 TELEGRAM_TOKEN = "7866537477:AAE_lT0ftBIpmq7NPBa0j8MImbihhjAkO4g"
 CHAT_ID = "390856599"
 
-# تحميل النموذج المدرب
+# تحميل نموذج الذكاء الاصطناعي
 model = joblib.load("model.pkl")
+
+# ملف تخزين القرارات السابقة
 LAST_DECISIONS_FILE = "last_decisions.json"
 
 def load_last_decisions():
@@ -36,7 +38,7 @@ def get_coin_list():
     url = "https://api.coingecko.com/api/v3/coins/list"
     response = requests.get(url)
     data = response.json()
-    return [coin["id"] for coin in data[:10]]
+    return [coin["id"] for coin in data[:10]]  # أول 10 عملات فقط
 
 def fetch_market_data(coin_id):
     url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart?vs_currency=usd&days=30"
@@ -78,12 +80,13 @@ def run_bot():
         features = [[latest["price"], latest["rsi"], latest["macd"]]]
         decision = model.predict(features)[0]
 
+        # لا ترسل نفس القرار مرتين
         if last_decisions.get(coin_id) != decision:
+            decision_emoji = {"BUY": "🟢", "SELL": "🔴", "HOLD": "⏸️"}.get(decision, "")
             decision_text = {"BUY": "شراء", "SELL": "بيع", "HOLD": "انتظار"}.get(decision, decision)
-            emoji = {"شراء": "🟢", "بيع": "🔴", "انتظار": "⏸️"}.get(decision_text, "")
             message = (
                 f"** {coin_id.upper()} **\n"
-                f"القرار: {decision_text} {emoji}\n"
+                f"{decision_emoji} القرار: {decision_text}\n"
                 f"RSI: {latest['rsi']:.2f} | MACD: {latest['macd']:.5f}\n"
                 f"السعر: {latest['price']:.2f} USD\n"
                 f"الوقت: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
@@ -93,7 +96,7 @@ def run_bot():
 
     save_last_decisions(last_decisions)
 
-# التكرار كل دقيقة
+# تشغيل البوت كل دقيقة
 while True:
     run_bot()
     time.sleep(60)
