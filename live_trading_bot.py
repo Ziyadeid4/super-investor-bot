@@ -5,14 +5,12 @@ import joblib
 import json
 from datetime import datetime
 
-# بيانات تليجرام
+# بيانات التليجرام
 TELEGRAM_TOKEN = "7866537477:AAE_lT0ftBIpmq7NPBa0j8MImbihhjAkO4g"
 CHAT_ID = "390856599"
 
-# تحميل نموذج الذكاء الاصطناعي
+# تحميل النموذج المدرب
 model = joblib.load("model.pkl")
-
-# ملف تخزين القرارات السابقة
 LAST_DECISIONS_FILE = "last_decisions.json"
 
 def load_last_decisions():
@@ -28,7 +26,7 @@ def save_last_decisions(data):
 
 def send_telegram(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    data = {"chat_id": CHAT_ID, "text": message}
+    data = {"chat_id": CHAT_ID, "text": message, "parse_mode": "Markdown"}
     try:
         requests.post(url, data=data)
     except:
@@ -38,7 +36,7 @@ def get_coin_list():
     url = "https://api.coingecko.com/api/v3/coins/list"
     response = requests.get(url)
     data = response.json()
-    return [coin["id"] for coin in data[:10]]  # أول 10 عملات فقط
+    return [coin["id"] for coin in list(data)[:10]]
 
 def fetch_market_data(coin_id):
     url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart?vs_currency=usd&days=30"
@@ -80,23 +78,23 @@ def run_bot():
         features = [[latest["price"], latest["rsi"], latest["macd"]]]
         decision = model.predict(features)[0]
 
-        # لا ترسل نفس القرار مرتين
         if last_decisions.get(coin_id) != decision:
-            decision_emoji = {"BUY": "🟢", "SELL": "🔴", "HOLD": "⏸️"}.get(decision, "")
+            emoji = "🟢" if decision == "BUY" else "🔴" if decision == "SELL" else "⏸️"
             decision_text = {"BUY": "شراء", "SELL": "بيع", "HOLD": "انتظار"}.get(decision, decision)
+
             message = (
-                f"** {coin_id.upper()} **\n"
-                f"{decision_emoji} القرار: {decision_text}\n"
+                f"*{emoji} {coin_id.upper()}*\n"
+                f"*القرار:* {decision_text}\n"
                 f"RSI: {latest['rsi']:.2f} | MACD: {latest['macd']:.5f}\n"
                 f"السعر: {latest['price']:.2f} USD\n"
                 f"الوقت: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
             )
+
             send_telegram(message)
             last_decisions[coin_id] = decision
 
     save_last_decisions(last_decisions)
 
-# تشغيل البوت كل دقيقة
 while True:
     run_bot()
     time.sleep(60)
