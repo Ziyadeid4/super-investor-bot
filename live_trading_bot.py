@@ -36,9 +36,15 @@ def send_telegram(message):
 
 def get_coin_list():
     url = "https://api.coingecko.com/api/v3/coins/list"
-    res = requests.get(url)
-    coins = res.json()
-    return [coin["id"] for coin in coins[:10]]  # ابدأ بـ 10 عملات مبدئيًا
+    response = requests.get(url)
+    coins = response.json()
+    
+    # تأكد إن البيانات قائمة
+    if isinstance(coins, list):
+        return [coin["id"] for coin in coins[:10]]
+    else:
+        return []
+
 
 def get_price_data(coin_id):
     url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart"
