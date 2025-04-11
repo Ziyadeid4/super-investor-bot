@@ -5,14 +5,14 @@ import joblib
 import json
 from datetime import datetime
 
-# بيانات التليجرام (توكينك و Chat ID)
+# بيانات التليجرام
 TELEGRAM_TOKEN = "7866537477:AAE_lT0ftBIpmq7NPBa0j8MImbihhjAkO4g"
 CHAT_ID = "390856599"
 
-# تحميل النموذج المدرب
+# تحميل النموذج
 model = joblib.load("model.pkl")
 
-# ملف تخزين آخر القرارات
+# ملف القرارات السابقة
 LAST_DECISIONS_FILE = "last_decisions.json"
 
 def load_last_decisions():
@@ -32,78 +32,81 @@ def send_telegram(message):
     try:
         requests.post(url, data=data)
     except:
-        print("❌ فشل إرسال الرسالة")
+        print("فشل إرسال رسالة تليجرام")
 
 def get_coin_list():
     url = "https://api.coingecko.com/api/v3/coins/list"
-    response = requests.get(url)
-    coins = response.json()
-    
-    # تأكد إن البيانات قائمة
-    if isinstance(coins, list):
-        return [coin["id"] for coin in coins[:10]]
-    else:
-        return []
+    res = requests.get(url)
+    coins = res.json()
+    return [coin["id"] for coin in coins[:10]]  # خذ أول 10 عملات مؤقتًا
 
-
-def get_price_data(coin_id):
-    url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart"
-    params = {"vs_currency": "usd", "days": "1", "interval": "minute"}
+def get_ohlc(coin_id):
+    url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart?vs_currency=usd&days=1&interval=hourly"
     res = requests.get(url)
     data = res.json()
     prices = data.get("prices", [])
-    if len(prices) < 30:
+    if len(prices) < 26:
         return None
-    df = pd.DataFrame(prices, columns=["timestamp", "close"])
-    df["close"] = df["close"]
+    df = pd.DataFrame(prices, columns=["timestamp", "price"])
+    df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
+    df.set_index("timestamp", inplace=True)
     return df
 
-def add_indicators(df):
-    df["rsi"] = df["close"].rolling(window=14).apply(
-        lambda x: 100 - (100 / (1 + (x.diff().clip(lower=0).mean() / (-x.diff().clip(upper=0).mean()))))
-    )
-    df["ema12"] = df["close"].ewm(span=12, adjust=False).mean()
-    df["ema26"] = df["close"].ewm(span=26, adjust=False).mean()
-    df["macd"] = df["ema12"] - df["ema26"]
-    df["signal"] = df["macd"].ewm(span=9, adjust=False).mean()
-    return df.dropna()
+def calculate_rsi(prices, period=14):
+    delta = prices.diff()
+    gain = delta.where(delta > 0, 0).rolling(period).mean()
+    loss = -delta.where(delta < 0, 0).rolling(period).mean()
+    rs = gain / loss
+    return 100 - (100 / (1 + rs))
 
-# تشغيل البوت
-last_decisions = load_last_decisions()
+def calculate_macd(prices):
+    exp1 = prices.ewm(span=12, adjust=False).mean()
+    exp2 = prices.ewm(span=26, adjust=False).mean()
+    macd = exp1 - exp2
+    signal = macd.ewm(span=9, adjust=False).mean()
+    return macd, signal
 
-while True:
-    coins = get_coin_list()
+def make_decision(rsi, macd, signal):
+    if rsi < 30 and macd.iloc[-1] > signal.iloc[-1]:
+        return "شراء"
+    elif rsi > 70 and macd.iloc[-1] < signal.iloc[-1]:
+        return "بيع"
+    else:
+        return "انتظار"
 
-    for coin in coins:
-        try:
-            df = get_price_data(coin)
-            if df is None:
-                continue
-            df = add_indicators(df)
-            latest = df.iloc[-1]
-            X = latest[["rsi", "macd", "signal"]].values.reshape(1, -1)
-            prediction = model.predict(X)[0]
+def run_bot():
+    last_decisions = load_last_decisions()
+    coin_ids = get_coin_list()
 
-            last_decision = last_decisions.get(coin)
-            if prediction != last_decision:
-                message = f"""🔔 توصية جديدة للعملة: {coin.upper()}
-🕒 الوقت: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-💰 السعر الحالي: {latest['close']:.3f} USD
+    for coin_id in coin_ids:
+        df = get_ohlc(coin_id)
+        if df is None:
+            continue
 
-📊 القرار الجديد: *{prediction.upper()}*
+        prices = df["price"]
+        rsi = calculate_rsi(prices).iloc[-1]
+        macd, signal = calculate_macd(prices)
+        decision = make_decision(rsi, macd, signal)
 
-📈 المؤشرات الفنية:
-- RSI: {latest['rsi']:.2f}
-- MACD: {latest['macd']:.4f}
-- Signal Line: {latest['signal']:.4f}
-"""
-                print(message)
-                send_telegram(message)
-                last_decisions[coin] = prediction
-
-        except Exception as e:
-            print(f"❌ خطأ في {coin}: {e}")
+        previous = last_decisions.get(coin_id)
+        if previous != decision:
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            message = (
+                f"العملة: {coin_id}\n"
+                f"التاريخ: {now}\n"
+                f"السعر: {prices.iloc[-1]:.2f} $\n"
+                f"RSI: {rsi:.2f}\n"
+                f"MACD: {macd.iloc[-1]:.5f}\n"
+                f"Signal: {signal.iloc[-1]:.5f}\n"
+                f"القرار: {decision}"
+            )
+            send_telegram(message)
+            last_decisions[coin_id] = decision
 
     save_last_decisions(last_decisions)
+
+# تشغيل البوت كل دقيقة
+while True:
+    run_bot()
     time.sleep(60)
 
