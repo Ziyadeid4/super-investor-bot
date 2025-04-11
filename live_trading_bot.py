@@ -1,4 +1,3 @@
-
 import requests
 import pandas as pd
 import time
@@ -35,7 +34,7 @@ def get_coin_list():
     url = "https://api.coingecko.com/api/v3/coins/list"
     response = requests.get(url)
     data = response.json()
-    return [coin["id"] for coin in data[:10]]  # فقط أول 10 عملات
+    return [coin["id"] for coin in data[:10]]  # أول 10 عملات كمثال
 
 def fetch_market_data(coin_id):
     url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart?vs_currency=usd&days=30"
@@ -80,17 +79,11 @@ def run_bot():
         if last_decisions.get(coin_id) != decision:
             decision_text = {"BUY": "شراء", "SELL": "بيع", "HOLD": "انتظار"}.get(decision, decision)
             message = (
-                f"📈 توصية جديدة
-"
-                f"💰 العملة: {coin_id.upper()}
-"
-                f"📊 القرار: {decision_text}
-"
-                f"📉 RSI: {latest['rsi']:.2f} | MACD: {latest['macd']:.5f}
-"
-                f"💵 السعر: {latest['price']:.2f} USD
-"
-                f"🕒 الوقت: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                f"** {coin_id.upper()} **\n"
+                f"القرار: {decision_text}\n"
+                f"RSI: {latest['rsi']:.2f} | MACD: {latest['macd']:.5f}\n"
+                f"السعر: {latest['price']:.2f} USD\n"
+                f"الوقت: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
             )
             send_telegram(message)
             last_decisions[coin_id] = decision
