@@ -31,10 +31,20 @@ def send_telegram(message):
         print("فشل في إرسال الرسالة")
 
 def get_coin_list():
-    # جلب أشهر 10 عملات فقط
-    url = "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=10&page=1"
-    response = requests.get(url)
-    return response.json()
+    # هذه قائمة يدوية لأشهر العملات
+    return [
+        "bitcoin",      # BTC
+        "ethereum",     # ETH
+        "tether",       # USDT
+        "ripple",       # XRP
+        "dogecoin",     # DOGE
+        "cardano",      # ADA
+        "solana",       # SOL
+        "binancecoin",  # BNB
+        "1000sats",     # 1000SATS
+        "shiba-inu"     # SHIB
+    ]
+
 
 def fetch_market_data(coin_id):
     url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart?vs_currency=usd&days=30"
