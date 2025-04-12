@@ -12,6 +12,11 @@ LAST_DECISIONS_FILE = "last_decisions.json"
 
 model = joblib.load(MODEL_PATH)
 
+coin_ids = [
+    "bitcoin", "ethereum", "tether", "ripple", "binancecoin",
+    "cardano", "solana", "dogecoin", "polkadot", "tron", "1000sats"
+]
+
 def load_last_decisions():
     try:
         with open(LAST_DECISIONS_FILE, "r") as f:
@@ -25,30 +30,21 @@ def save_last_decisions(data):
 
 def send_telegram(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    data = {"chat_id": CHAT_ID, "text": message, "parse_mode": "Markdown"}
+    data = {"chat_id": CHAT_ID, "text": message, "parse_mode": "HTML"}
     try:
         requests.post(url, data=data)
-    except:
-        print("فشل في إرسال الرسالة إلى تليجرام")
-
-def get_coin_list():
-    url = "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=10&page=1"
-    response = requests.get(url)
-    data = response.json()
-    coin_ids = [coin["id"] for coin in data]
-    if "1000sats" not in coin_ids:
-        coin_ids.append("1000sats")
-    return coin_ids
+    except Exception as e:
+        print("Telegram error:", e)
 
 def fetch_market_data(coin_id):
     url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart?vs_currency=usd&days=30"
-    response = requests.get(url)
-    data = response.json()
     try:
+        response = requests.get(url)
+        data = response.json()
         prices = [x[1] for x in data["prices"]]
         df = pd.DataFrame(prices, columns=["price"])
         df["rsi"] = compute_rsi(df["price"])
-        df["macd"] = compute_macd(df["price"])
+        df["macd"], df["signal"] = compute_macd(df["price"])
         return df
     except:
         return None
@@ -65,20 +61,26 @@ def compute_macd(series, short=12, long=26, signal=9):
     long_ema = series.ewm(span=long, adjust=False).mean()
     macd = short_ema - long_ema
     signal_line = macd.ewm(span=signal, adjust=False).mean()
-    return macd - signal_line
+    return macd, signal_line
 
-def get_coin_symbol(coin_id):
-    url = f"https://api.coingecko.com/api/v3/coins/{coin_id}"
+def fetch_price(coin_id):
+    url = f"https://api.coingecko.com/api/v3/simple/price?ids={coin_id}&vs_currencies=usd"
     try:
         response = requests.get(url)
         data = response.json()
-        return data["symbol"].upper(), data["market_data"]["current_price"]["usd"]
+        return data.get(coin_id, {}).get("usd", 0)
     except:
-        return coin_id.upper(), 0.0
+        return 0
+
+def emoji_for_decision(decision):
+    return {
+        "BUY": "🟢",
+        "SELL": "🔴",
+        "HOLD": "🟡"
+    }.get(decision, "❓")
 
 def run_bot():
     last_decisions = load_last_decisions()
-    coin_ids = get_coin_list()
 
     for coin_id in coin_ids:
         df = fetch_market_data(coin_id)
@@ -86,22 +88,21 @@ def run_bot():
             continue
 
         latest = df.dropna().iloc[-1]
-        features = [[latest["price"], latest["rsi"], latest["macd"]]]
+        price = fetch_price(coin_id)
+        features = [[latest["price"], latest["rsi"], latest["macd"], latest["signal"]]]
         decision = model.predict(features)[0]
 
         if last_decisions.get(coin_id) != decision:
-            decision_emoji = {"BUY": "🟢", "SELL": "🔴", "HOLD": "🟡"}.get(decision, "")
-            decision_text = {"BUY": "شراء", "SELL": "بيع", "HOLD": "انتظار"}.get(decision, decision)
-            symbol, price = get_coin_symbol(coin_id)
+            emoji = emoji_for_decision(decision)
+            name = coin_id.upper()
+            message = f"""<b>** {name} ** {emoji}</b>
 
-            message = (
-                f"** {symbol} ** {decision_emoji}\n"
-                f"القرار: {decision_text}\n"
-                f"RSI: {latest['rsi']:.2f} | MACD: {latest['macd']:.5f}\n"
-                f"السعر: {price:.2f} USD\n"
-                f"الوقت: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-            )
-
+<b>✅ القرار:</b> {{"BUY":"شراء","SELL":"بيع","HOLD":"انتظار"}.get(decision, decision)}
+<b>📊 RSI:</b> {latest['rsi']:.2f} | <b>MACD:</b> {latest['macd']:.5f}
+<b>📈 Signal:</b> {latest['signal']:.5f}
+<b>💰 السعر:</b> {price:.2f} USD
+<b>🕒 الوقت:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+"""
             send_telegram(message)
             last_decisions[coin_id] = decision
 
