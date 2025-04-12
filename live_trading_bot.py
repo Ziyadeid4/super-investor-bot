@@ -7,15 +7,9 @@ from datetime import datetime
 
 TELEGRAM_TOKEN = "7866537477:AAE_lT0ftBIpmq7NPBa0j8MImbihhjAkO4g"
 CHAT_ID = "390856599"
-MODEL_PATH = "model.pkl"
+
+model = joblib.load("model.pkl")
 LAST_DECISIONS_FILE = "last_decisions.json"
-
-model = joblib.load(MODEL_PATH)
-
-coin_ids = [
-    "bitcoin", "ethereum", "tether", "ripple", "binancecoin",
-    "cardano", "solana", "dogecoin", "polkadot", "tron", "1000sats"
-]
 
 def load_last_decisions():
     try:
@@ -30,21 +24,27 @@ def save_last_decisions(data):
 
 def send_telegram(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    data = {"chat_id": CHAT_ID, "text": message, "parse_mode": "HTML"}
+    data = {"chat_id": CHAT_ID, "text": message}
     try:
         requests.post(url, data=data)
-    except Exception as e:
-        print("Telegram error:", e)
+    except:
+        print("فشل في إرسال الرسالة")
+
+def get_coin_list():
+    return [
+        "bitcoin", "ethereum", "tether", "ripple", "solana",
+        "binancecoin", "dogecoin", "cardano", "shiba-inu", "1000sats"
+    ]
 
 def fetch_market_data(coin_id):
     url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart?vs_currency=usd&days=30"
+    response = requests.get(url)
+    data = response.json()
     try:
-        response = requests.get(url)
-        data = response.json()
         prices = [x[1] for x in data["prices"]]
         df = pd.DataFrame(prices, columns=["price"])
         df["rsi"] = compute_rsi(df["price"])
-        df["macd"], df["signal"] = compute_macd(df["price"])
+        df["macd"] = compute_macd(df["price"])
         return df
     except:
         return None
@@ -61,26 +61,11 @@ def compute_macd(series, short=12, long=26, signal=9):
     long_ema = series.ewm(span=long, adjust=False).mean()
     macd = short_ema - long_ema
     signal_line = macd.ewm(span=signal, adjust=False).mean()
-    return macd, signal_line
-
-def fetch_price(coin_id):
-    url = f"https://api.coingecko.com/api/v3/simple/price?ids={coin_id}&vs_currencies=usd"
-    try:
-        response = requests.get(url)
-        data = response.json()
-        return data.get(coin_id, {}).get("usd", 0)
-    except:
-        return 0
-
-def emoji_for_decision(decision):
-    return {
-        "BUY": "🟢",
-        "SELL": "🔴",
-        "HOLD": "🟡"
-    }.get(decision, "❓")
+    return macd - signal_line
 
 def run_bot():
     last_decisions = load_last_decisions()
+    coin_ids = get_coin_list()
 
     for coin_id in coin_ids:
         df = fetch_market_data(coin_id)
@@ -88,21 +73,24 @@ def run_bot():
             continue
 
         latest = df.dropna().iloc[-1]
-        price = fetch_price(coin_id)
-        features = [[latest["price"], latest["rsi"], latest["macd"], latest["signal"]]]
+        features = [[latest["price"], latest["rsi"], latest["macd"]]]
         decision = model.predict(features)[0]
 
         if last_decisions.get(coin_id) != decision:
-            emoji = emoji_for_decision(decision)
-            name = coin_id.upper()
-            message = f"""<b>** {name} ** {emoji}</b>
-
-<b>✅ القرار:</b> {{"BUY":"شراء","SELL":"بيع","HOLD":"انتظار"}.get(decision, decision)}
-<b>📊 RSI:</b> {latest['rsi']:.2f} | <b>MACD:</b> {latest['macd']:.5f}
-<b>📈 Signal:</b> {latest['signal']:.5f}
-<b>💰 السعر:</b> {price:.2f} USD
-<b>🕒 الوقت:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-"""
+            emoji = {"BUY": "🟢", "SELL": "🔴", "HOLD": "🟡"}.get(decision, "")
+            decision_text = {"BUY": "✅ دخول الآن (شراء)", "SELL": "❌ خروج الآن (بيع)", "HOLD": "⏳ انتظر"}.get(decision, decision)
+            price = latest["price"]
+            rsi = latest["rsi"]
+            macd = latest["macd"]
+            message = (
+                f"🤖 إشعار من البوت المستثمر الخارق:\n"
+                f"** {coin_id.upper()} ** {emoji}\n"
+                f"🕒 الوقت: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+                f"💰 السعر: {price:.2f} USD\n"
+                f"📊 RSI: {rsi:.2f}\n"
+                f"📈 MACD: {macd:.5f}\n"
+                f"✅ القرار: {decision_text}"
+            )
             send_telegram(message)
             last_decisions[coin_id] = decision
 
