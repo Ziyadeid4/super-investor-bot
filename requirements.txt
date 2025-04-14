@@ -2,4 +2,6 @@ pandas
 numpy
 scikit-learn
 ta
+requests
 python-telegram-bot
+kucoin-python
