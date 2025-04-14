@@ -1,5 +1,5 @@
-ccxt
 pandas
-requests
-joblib
+numpy
 scikit-learn
+ta
+python-telegram-bot
