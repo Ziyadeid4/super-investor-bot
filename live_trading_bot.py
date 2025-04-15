@@ -1,85 +1,124 @@
-import pandas as pd
+# ✅ live_trading_bot.py - نسخة محدثة بحساب الربح ومنع التكرار
+
 import requests
+import pandas as pd
+import ta
 import time
-import json
-from datetime import datetime
-from ta.momentum import RSIIndicator
-from ta.trend import MACD
 import joblib
+from datetime import datetime
+import csv
 
-# إعدادات التيليجرام
-TELEGRAM_TOKEN = "7866537477:AAE_lT0ftBIpmq7NPBa0j8MImbihhjAkO4g"
-CHAT_ID = "390856599"
+model = joblib.load("xgb_model.pkl")
+label_encoder = joblib.load("label_encoder.pkl")
 
-# العملات التي سيتم تحليلها
-symbols = ["BTC-USDT", "ETH-USDT", "XRP-USDT", "SOL-USDT", "DOGE-USDT",
-           "ADA-USDT", "SHIB-USDT", "BNB-USDT"]
+symbols = [
+    "BTC-USDT", "ETH-USDT", "BNB-USDT", "SOL-USDT", "XRP-USDT", "ADA-USDT",
+    "AVAX-USDT", "DOT-USDT", "LTC-USDT", "DOGE-USDT", "SHIB-USDT", "PEPE-USDT",
+    "FLOKI-USDT", "BONK-USDT", "WIF-USDT", "SUI-USDT", "INJ-USDT",
+    "APT-USDT", "OP-USDT", "ARB-USDT"
+]
 
-# تحميل النموذج المدرب
-model = joblib.load("model.pkl")
+positions = {}  # لمتابعة الصفقات المفتوحة
+last_decisions = {}  # لحفظ آخر توصية تم إرسالها
+log_file = "trade_log.csv"
 
-# لتجنب التكرار
-last_decisions = {}
+bot_token = "7866537477:AAE_lT0ftBIpmq7NPBa0j8MImbihhjAkO4g"
+chat_id = "390856599"
 
-
-def fetch_kucoin_price(symbol):
-    url = f"https://api.kucoin.com/api/v1/market/candles?type=5min&symbol={symbol}&limit=100"
-    response = requests.get(url)
-    if response.status_code == 200:
-        data = response.json()["data"]
-        df = pd.DataFrame(data, columns=["timestamp", "open", "close", "high", "low", "volume", "turnover"])
-        df = df.iloc[::-1]
-        df[["open", "close", "high", "low", "volume"]] = df[["open", "close", "high", "low", "volume"]].astype(float)
-        df["close"] = pd.to_numeric(df["close"])
-        df["RSI"] = RSIIndicator(close=df["close"]).rsi()
-        df["MACD"] = MACD(close=df["close"]).macd_diff()
-        df.dropna(inplace=True)
-        return df
-    else:
-        print(f"❌ فشل في جلب بيانات {symbol}")
-        return None
-
-
-def send_telegram(message):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    data = {"chat_id": CHAT_ID, "text": message, "parse_mode": "HTML"}
+def send_to_telegram(message):
+    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+    payload = {"chat_id": chat_id, "text": message}
     try:
-        requests.post(url, data=data)
+        r = requests.post(url, data=payload)
+        print(f"📤 تم الإرسال إلى تليجرام: {r.status_code}")
     except Exception as e:
-        print("فشل في إرسال الرسالة:", e)
+        print("❌ فشل إرسال تليجرام:", e)
 
+def fetch_kucoin_data(symbol, limit=100):
+    try:
+        url = f"https://api.kucoin.com/api/v1/market/candles?type=1min&symbol={symbol}"
+        response = requests.get(url).json()
+        raw_data = response['data'][:limit]
+        raw_data.reverse()
+        df = pd.DataFrame(raw_data, columns=[
+            "timestamp", "open", "close", "high", "low", "volume", "turnover"
+        ])
+        df = df.astype({"open": float, "high": float, "low": float, "close": float, "volume": float})
+        latest_price = float(df.iloc[-1]["close"])
+        return df, latest_price
+    except Exception as e:
+        print(f"❌ خطأ في {symbol}: {e}")
+        return None, None
+
+send_to_telegram("✅ تم تشغيل البوت - التحليل مع تتبع الصفقات والتغيير فقط 🔁")
 
 while True:
     for symbol in symbols:
-        df = fetch_kucoin_price(symbol)
-        if df is None or df.empty:
+        print(f"🔄 جاري تحليل: {symbol}")
+        df, price = fetch_kucoin_data(symbol)
+        if df is None or len(df) < 30:
+            print(f"⚠️ بيانات غير كافية لـ {symbol}")
+            continue
+
+        df["rsi"] = ta.momentum.RSIIndicator(close=df["close"]).rsi()
+        df["macd"] = ta.trend.MACD(close=df["close"]).macd_diff()
+        df = df.dropna()
+
+        if df.empty:
+            print(f"⚠️ فشل حساب المؤشرات لـ {symbol}")
             continue
 
         latest = df.iloc[-1]
-        features = latest[["close", "RSI", "MACD"]].values.reshape(1, -1)
-        decision = model.predict(features)[0]
+        features = [[latest["close"], latest["rsi"], latest["macd"]]]
+        prediction = model.predict(features)
+        decision = label_encoder.inverse_transform(prediction)[0]
 
-        # اسم مختصر للعملة
-        name = symbol.replace("-USDT", "")
-
-        # تجنب التكرار
-        if symbol in last_decisions and last_decisions[symbol] == decision:
-            continue
-        last_decisions[symbol] = decision
-
-        # تنسيق الوقت
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        symbol_clean = symbol.replace("-USDT", "")
 
-        # إنشاء الرسالة
-        emoji = {"BUY": "🟢", "SELL": "🔴", "HOLD": "⏳"}
-        message = f"<b>🚀 توصية جديدة للعملة: {name}</b>\n"
-        message += f"🕒 <b>الوقت:</b> {now}\n"
-        message += f"💵 <b>السعر:</b> {latest['close']:.2f} USDT\n"
-        message += f"📊 <b>RSI:</b> {latest['RSI']:.2f}\n"
-        message += f"📈 <b>MACD:</b> {latest['MACD']:.2f}\n"
-        message += f"✅ <b>القرار:</b> {decision} {emoji[decision]}"
+        # متابعة تغير القرار فقط
+        if symbol_clean in last_decisions and last_decisions[symbol_clean] == decision:
+            print(f"⏩ {symbol} لم يتغير القرار ({decision}) - تجاهل الإشعار")
+            continue
 
-        send_telegram(message)
-        print(f"✅ أُرسلت توصية {symbol}: {decision}")
+        last_decisions[symbol_clean] = decision
 
-    time.sleep(60)  # كل دقيقة
+        # التبديل بين BUY/SELL لحساب الربح
+        if symbol_clean in positions:
+            prev = positions[symbol_clean]
+            if decision != prev["type"] and decision in ["BUY", "SELL"]:
+                entry = prev["price"]
+                exit = price
+                direction = prev["type"]
+                profit = ((exit - entry) / entry * 100) if direction == "BUY" else ((entry - exit) / entry * 100)
+
+                trade_message = f"""
+🔁 {symbol_clean} | {direction} → {decision}
+💸 السعر من: {round(entry, 4)} → {round(exit, 4)}
+📈 نسبة الربح: {round(profit, 2)}%
+⏰ الدخول: {prev['time']} | الخروج: {now}
+"""
+                send_to_telegram(trade_message)
+
+                with open(log_file, "a", newline="") as f:
+                    writer = csv.writer(f)
+                    writer.writerow([symbol_clean, direction, prev["time"], entry, decision, now, exit, round(profit, 3)])
+
+                del positions[symbol_clean]
+
+        if decision in ["BUY", "SELL"]:
+            positions[symbol_clean] = {"type": decision, "price": price, "time": now}
+
+        message = f"""
+📊 {symbol}
+💰 السعر الحالي: {round(price, 4)}
+📈 RSI: {round(latest['rsi'],2)}
+📉 MACD: {round(latest['macd'],4)}
+📥 التوصية: {decision}
+⏰ التوقيت: {now}
+"""
+        send_to_telegram(message)
+        print(message)
+
+    print("⏱️ انتظار 60 ثانية قبل التكرار...\n")
+    time.sleep(60)

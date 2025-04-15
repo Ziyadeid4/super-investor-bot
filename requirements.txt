@@ -5,3 +5,4 @@ ta
 requests
 python-telegram-bot
 kucoin-python
+Joblib
