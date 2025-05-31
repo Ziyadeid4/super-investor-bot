@@ -39,4 +39,4 @@ while True:
                 emoji = "📈" if price > last_price else "📉"
                 send_to_telegram(f"{emoji} ETH السعر الجديد: {price:.2f} USDT\nنسبة التغير: {diff:.2f}%")
                 last_price = price
-    time.sleep(60)
+    time.sleep(5)
