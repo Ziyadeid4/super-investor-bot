@@ -1,86 +1,70 @@
 import requests
 import time
 from datetime import datetime
-import pandas as pd
 import ta
+import pandas as pd
 
 bot_token = "7866537477:AAE_lT0ftBIpmq7NPBa0j8MImbihhjAkO4g"
 chat_id = "390856599"
 
-twelve_api_key = "b11e3ef5e7ae49e5a3573430f1eb8958"
-
-eth_symbol = "ETH/USD"
 gold_symbol = "XAU/USD"
+eth_symbol = "ETH/USD"
 
-last_price_eth = None
-last_price_gold = None
-
+gold_last_price = None
+eth_last_price = None
 
 def send_to_telegram(message):
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
     payload = {"chat_id": chat_id, "text": message}
     try:
         r = requests.post(url, data=payload)
-        print(f"📤 Telegram sent: {r.status_code}")
+        print("📤 Telegram sent:", r.status_code)
     except Exception as e:
-        print("❌ Telegram error:", e)
+        print("❌ Telegram send error:", e)
 
-
-def fetch_price_and_indicators(symbol):
+def fetch_price(symbol):
     try:
-        url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval=1min&apikey={twelve_api_key}&outputsize=30"
+        url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval=1min&apikey=b11e3ef5e7ae49e5a3573430f1eb8958"
         response = requests.get(url).json()
-        if "values" not in response:
-            raise ValueError("No 'values' in response")
-        df = pd.DataFrame(response["values"])
-        df = df.iloc[::-1].copy()
-        df["close"] = df["close"].astype(float)
-        df.set_index("datetime", inplace=True)
-
-        rsi = ta.momentum.RSIIndicator(close=df["close"]).rsi()
-        macd = ta.trend.MACD(close=df["close"]).macd_diff()
-
-        current_price = df["close"].iloc[-1]
-        latest_rsi = rsi.iloc[-1]
-        latest_macd = macd.iloc[-1]
-
-        return current_price, latest_rsi, latest_macd
+        values = response['values']
+        df = pd.DataFrame(values)
+        df = df.iloc[::-1]  # ترتيب تصاعدي
+        df['close'] = df['close'].astype(float)
+        df['rsi'] = ta.momentum.RSIIndicator(df['close']).rsi()
+        df['macd'] = ta.trend.MACD(df['close']).macd_diff()
+        latest = df.iloc[-1]
+        return float(latest['close']), round(latest['rsi'], 2), round(latest['macd'], 2)
     except Exception as e:
         print(f"❌ Error fetching {symbol}:", e)
         return None, None, None
 
-
-send_to_telegram("✅ بدأ التتبع: ETH ⬅️ 1% | GOLD ⬅️ $5")
+send_to_telegram("✅ بدأ التتبع: ETH ⬅️ 1٪ | GOLD ⬅️ $5 ✅")
 
 while True:
-    # ETH check
-    eth_price, eth_rsi, eth_macd = fetch_price_and_indicators(eth_symbol)
+    # ETH
+    eth_price, eth_rsi, eth_macd = fetch_price(eth_symbol)
     if eth_price:
-        if last_price_eth is None:
-            last_price_eth = eth_price
-            send_to_telegram(f"📡 ETH: ${eth_price:.2f}\nRSI: {eth_rsi:.2f} | MACD: {eth_macd:.2f}")
+        if eth_last_price is None:
+            eth_last_price = eth_price
+            send_to_telegram(f"📡 ETH: ${eth_price:.2f}\nRSI: {eth_rsi} | MACD: {eth_macd}")
         else:
-            diff_eth = abs(eth_price - last_price_eth) / last_price_eth * 100
-            if diff_eth >= 1:
-                emoji = "📈" if eth_price > last_price_eth else "📉"
-                send_to_telegram(f"{emoji} ETH ${eth_price:.2f} | نسبة التغير: {diff_eth:.2f}%\nRSI: {eth_rsi:.2f} | MACD: {eth_macd:.2f}")
-                last_price_eth = eth_price
-            else:
-                last_price_eth = eth_price
+            diff_percent = abs(eth_price - eth_last_price) / eth_last_price * 100
+            if diff_percent >= 1:
+                emoji = "📈" if eth_price > eth_last_price else "📉"
+                send_to_telegram(f"{emoji} ETH ${eth_price:.2f} | نسبة التغير: {diff_percent:.2f}%\nRSI: {eth_rsi} | MACD: {eth_macd}")
+                eth_last_price = eth_price
 
-    # GOLD check
-    gold_price, gold_rsi, gold_macd = fetch_price_and_indicators(gold_symbol)
+    # GOLD
+    gold_price, gold_rsi, gold_macd = fetch_price(gold_symbol)
     if gold_price:
-        if last_price_gold is None:
-            last_price_gold = gold_price
-            send_to_telegram(f"📡 GOLD: ${gold_price:.2f}\nRSI: {gold_rsi:.2f} | MACD: {gold_macd:.2f}")
+        if gold_last_price is None:
+            gold_last_price = gold_price
+            send_to_telegram(f"📡 GOLD: ${gold_price:.2f}\nRSI: {gold_rsi} | MACD: {gold_macd}")
         else:
-            diff_gold = abs(gold_price - last_price_gold)
-            if diff_gold >= 5:
-                emoji = "📈" if gold_price > last_price_gold else "📉"
-                send_to_telegram(f"{emoji} GOLD: ${gold_price:.2f} | فرق: {diff_gold:.2f} USD\nRSI: {gold_rsi:.2f} | MACD: {gold_macd:.2f}")
-                last_price_gold = gold_price
-            else:
-                last_price_gold = gold_price
+            diff_usd = abs(gold_price - gold_last_price)
+            if diff_usd >= 5:
+                emoji = "📈" if gold_price > gold_last_price else "📉"
+                send_to_telegram(f"{emoji} GOLD: ${gold_price:.2f} | فرق: {diff_usd:.2f} USD\nRSI: {gold_rsi} | MACD: {gold_macd}")
+                gold_last_price = gold_price
 
-    time.sleep(60)
+    time.sleep(10)
