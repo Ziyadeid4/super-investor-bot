@@ -14,6 +14,7 @@ api_key = "b11e3ef5e7ae49e5a3573430f1eb8958"
 last_price_eth = None
 last_price_gold = None
 
+
 def send_to_telegram(message):
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
     payload = {"chat_id": chat_id, "text": message}
@@ -23,19 +24,22 @@ def send_to_telegram(message):
     except Exception as e:
         print("❌ Telegram send error:", e)
 
+
 def fetch_data(symbol):
     try:
         url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval=1min&apikey={api_key}&outputsize=30"
         response = requests.get(url).json()
         df = pd.DataFrame(response['values'])
-        df = df.astype(float)
+        df = df.astype({"open": float, "high": float, "low": float, "close": float})
         df["RSI"] = ta.momentum.RSIIndicator(close=df["close"]).rsi()
         df["MACD"] = ta.trend.MACD(close=df["close"]).macd_diff()
+        df = df.dropna()
         latest = df.iloc[0]
         return float(latest["close"]), float(latest["RSI"]), float(latest["MACD"])
     except Exception as e:
         print(f"❌ Error fetching {symbol}:", e)
         return None, None, None
+
 
 send_to_telegram("✅ ETH ⬅️ 1% | GOLD ⬅️ $5: بدأ التتبع")
 
